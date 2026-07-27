@@ -1,0 +1,63 @@
+name: ${COMPOSE_PROJECT_NAME:-docling-local}
+
+x-docling-image: &docling-image
+  image: ${DOCLING_IMAGE_REPOSITORY:-quay.io/docling-project/docling-serve}:${DOCLING_VERSION:-v1.23.0}
+
+x-docling-environment: &docling-environment
+  HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+  DOCLING_SERVE_ENABLE_UI: ${DOCLING_SERVE_ENABLE_UI:-1}
+  DOCLING_SERVE_API_KEY: ${DOCLING_API_KEY:-}
+  DOCLING_SERVE_ENG_KIND: local
+  DOCLING_SERVE_ENG_LOC_NUM_WORKERS: ${DOCLING_LOCAL_WORKERS:-2}
+  DOCLING_SERVE_ENG_LOC_SHARE_MODELS: ${DOCLING_SHARE_MODELS:-true}
+  DOCLING_DEVICE: ${DOCLING_DEVICE:-auto}
+  DOCLING_NUM_THREADS: ${DOCLING_NUM_THREADS:-4}
+  UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
+  UVICORN_RELOAD: "false"
+
+services:
+  docling-serve:
+    <<: *docling-image
+    environment:
+      <<: *docling-environment
+    ports:
+      - "${DOCLING_BIND_ADDRESS:-127.0.0.1}:${DOCLING_PORT:-5001}:5001"
+    volumes:
+      - docling_cache:/opt/app-root/src/.cache
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:5001/docs', timeout=5).read(1)
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: ${DOCLING_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCLING_LOG_MAX_FILES:-3}
+
+  docling-models:
+    <<: *docling-image
+    profiles: [tools]
+    command: ["bash", "-lc", "docling-tools models download --all"]
+    environment:
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+    volumes:
+      - docling_cache:/opt/app-root/src/.cache
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  docling_cache:
+    name: ${DOCLING_CACHE_VOLUME:-docling-local-cache}

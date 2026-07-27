@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""Dependency-free local client for the Docling Serve multipart API."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import mimetypes
+import os
+import secrets
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+CONTENT_KEYS = {
+    "md": "md_content",
+    "html": "html_content",
+    "text": "text_content",
+    "json": "json_content",
+    "doctags": "doctags_content",
+}
+EXTENSIONS = {
+    "md": ".md",
+    "html": ".html",
+    "text": ".txt",
+    "json": ".json",
+    "doctags": ".doctags",
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Convert a local document through a running Docling Serve instance."
+    )
+    parser.add_argument("file", type=Path, help="Document to convert")
+    parser.add_argument(
+        "--format",
+        choices=CONTENT_KEYS,
+        default="md",
+        help="Output format (default: md)",
+    )
+    parser.add_argument("--output", type=Path, help="Output file path")
+    parser.add_argument(
+        "--api-url",
+        default=os.getenv("DOCLING_API_URL", "http://127.0.0.1:5001"),
+        help="Docling Serve base URL",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("DOCLING_API_KEY", ""),
+        help="API key; defaults to DOCLING_API_KEY",
+    )
+    parser.add_argument(
+        "--ocr",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable OCR (default: enabled)",
+    )
+    parser.add_argument(
+        "--table-mode",
+        choices=("fast", "accurate"),
+        default="accurate",
+        help="Table extraction mode (default: accurate)",
+    )
+    parser.add_argument(
+        "--image-export-mode",
+        choices=("placeholder", "embedded", "referenced"),
+        default="embedded",
+        help="Image export mode (default: embedded)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1800,
+        help="HTTP timeout in seconds (default: 1800)",
+    )
+    return parser.parse_args()
+
+
+def form_field(name: str, value: str, boundary: str) -> bytes:
+    return (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+        f"{value}\r\n"
+    ).encode()
+
+
+def file_field(path: Path, boundary: str) -> bytes:
+    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    header = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="files"; filename="{path.name}"\r\n'
+        f"Content-Type: {mime_type}\r\n\r\n"
+    ).encode()
+    return header + path.read_bytes() + b"\r\n"
+
+
+def build_request_body(args: argparse.Namespace, boundary: str) -> bytes:
+    parts = [
+        file_field(args.file, boundary),
+        form_field("to_formats", args.format, boundary),
+        form_field("do_ocr", str(args.ocr).lower(), boundary),
+        form_field("image_export_mode", args.image_export_mode, boundary),
+        form_field("table_mode", args.table_mode, boundary),
+    ]
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts)
+
+
+def request_conversion(args: argparse.Namespace) -> dict[str, Any]:
+    boundary = f"----docling-local-{secrets.token_hex(16)}"
+    endpoint = f"{args.api_url.rstrip('/')}/v1/convert/file"
+    body = build_request_body(args, boundary)
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+    if args.api_key:
+        headers["X-Api-Key"] = args.api_key
+
+    request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=args.timeout) as response:
+            payload = response.read()
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Docling Serve returned HTTP {error.code}: {detail}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Could not reach Docling Serve at {args.api_url}: {error.reason}") from error
+
+    try:
+        decoded = json.loads(payload)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Docling Serve returned a non-JSON response") from error
+
+    if not isinstance(decoded, dict):
+        raise RuntimeError("Docling Serve returned an unexpected response shape")
+    return decoded
+
+
+def extract_content(response: dict[str, Any], output_format: str) -> str:
+    status = response.get("status", "unknown")
+    errors = response.get("errors") or []
+    if status not in {"success", "partial_success"}:
+        raise RuntimeError(
+            f"Conversion failed with status {status!r}: {json.dumps(errors, ensure_ascii=False)}"
+        )
+
+    document = response.get("document")
+    if not isinstance(document, dict):
+        raise RuntimeError("Response does not contain a document object")
+
+    content = document.get(CONTENT_KEYS[output_format])
+    if content is None:
+        raise RuntimeError(
+            f"Response does not contain {CONTENT_KEYS[output_format]!r}; inspect the live API schema at /docs"
+        )
+
+    if output_format == "json":
+        return json.dumps(content, ensure_ascii=False, indent=2) + "\n"
+    if not isinstance(content, str):
+        raise RuntimeError("Converted content has an unexpected type")
+    return content
+
+
+def main() -> int:
+    args = parse_args()
+    args.file = args.file.expanduser().resolve()
+
+    if not args.file.is_file():
+        print(f"error: file not found: {args.file}", file=sys.stderr)
+        return 2
+    if args.timeout <= 0:
+        print("error: --timeout must be greater than zero", file=sys.stderr)
+        return 2
+
+    output = args.output
+    if output is None:
+        output_dir = Path("output")
+        output = output_dir / f"{args.file.stem}{EXTENSIONS[args.format]}"
+    output = output.expanduser().resolve()
+
+    try:
+        response = request_conversion(args)
+        content = extract_content(response, args.format)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content, encoding="utf-8")
+    except (OSError, RuntimeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+    status = response.get("status", "unknown")
+    processing_time = response.get("processing_time")
+    suffix = f" in {processing_time:.2f}s" if isinstance(processing_time, (int, float)) else ""
+    print(f"Converted {args.file.name} -> {output} ({status}{suffix})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

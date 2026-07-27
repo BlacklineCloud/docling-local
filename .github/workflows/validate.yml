@@ -1,0 +1,31 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: cp .env.example .env
+
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+
+      - name: Validate shell syntax
+        run: bash -n scripts/*.sh
+
+      - name: Validate Python syntax
+        run: python3 -m py_compile bin/docling-convert
+
+      - name: Verify executable files
+        run: test -x bin/docling-convert && test -x scripts/wait-for-service.sh && test -x scripts/smoke-test.sh
