@@ -62,14 +62,18 @@ Do not attach confidential documents to public bug reports.
 ```bash
 # Edit DOCLING_VERSION in .env first.
 make pull
+make models
 make up
 make wait
 make smoke
 ```
 
-Test several representative internal documents before considering the upgrade
-complete. Pin the previous version again to roll back the container. The cache
-volume remains shared across versions; reset it only when necessary.
+Running `make models` after pulling a new image populates checkpoints newly
+required by that Docling release while preserving the existing named cache.
+Test several representative internal documents and the Gradio UI before
+considering the upgrade complete. Pin the previous version again to roll back
+the container. Reset the cache only when it is corrupted or upstream explicitly
+requires a clean model set.
 
 ## Backup and retention
 
@@ -83,9 +87,9 @@ be the only copy of a converted document.
 
 ## Resource planning
 
-The official image and complete model set require substantial disk space.
-Conversion memory depends on page count, resolution, OCR, table extraction,
-selected pipeline, and concurrency.
+The official image and prefetched runtime model set require substantial disk
+space. Conversion memory depends on page count, resolution, OCR, table
+extraction, selected pipeline, and concurrency.
 
 Start with two local conversion workers and one Uvicorn worker. Reduce
 `DOCLING_LOCAL_WORKERS` to `1` when memory pressure or out-of-memory restarts
