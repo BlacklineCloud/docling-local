@@ -6,7 +6,7 @@ The default image is pinned through two variables:
 
 ```dotenv
 DOCLING_IMAGE_REPOSITORY=quay.io/docling-project/docling-serve
-DOCLING_VERSION=v1.23.0
+DOCLING_VERSION=v1.32.0
 ```
 
 Pin explicit versions in shared environments. Avoid `latest` because it makes
@@ -95,8 +95,11 @@ Inspect it with:
 docker volume inspect docling-local-cache
 ```
 
-Normal `make down` and upgrades preserve this volume. `make reset-cache`
-permanently deletes it.
+Normal `make down` and upgrades preserve this volume. After changing
+`DOCLING_VERSION`, run `make models` to add checkpoints required by the newly
+pinned image. `make reset-cache` permanently deletes the volume and should be
+reserved for corrupted caches or upstream migrations that require a clean
+model set.
 
 ## Log rotation
 
