@@ -17,7 +17,7 @@ client for converting local files.
 - Reproducible, version-pinned Docling Serve deployment
 - Local-only network binding by default
 - Persistent model cache across container recreation
-- Optional one-command download of all Docling models
+- One-command prefetch of Docling's default runtime model set
 - Gradio UI, REST API, and interactive OpenAPI documentation
 - Docker health check and bounded container logs
 - Dependency-free Python client for local file conversion
@@ -46,7 +46,7 @@ make start
 
 `make start` performs three steps:
 
-1. downloads all Docling models into a named Docker volume;
+1. downloads Docling's default runtime model set into a named Docker volume;
 2. starts Docling Serve in the background;
 3. waits until the HTTP service is ready.
 
@@ -105,7 +105,7 @@ make smoke        # verify that the HTTP service responds
 make stop         # stop without deleting the container
 make down         # remove containers and network; keep models
 make pull         # pull the configured upstream image
-make models       # download or refresh all cached models
+make models       # download or refresh the default runtime model set
 make reset-cache  # permanently delete downloaded model data
 ```
 
@@ -116,7 +116,7 @@ important settings are:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DOCLING_VERSION` | `v1.23.0` | Pinned upstream image tag |
+| `DOCLING_VERSION` | `v1.32.0` | Pinned upstream image tag |
 | `DOCLING_BIND_ADDRESS` | `127.0.0.1` | Host address exposed by Docker |
 | `DOCLING_PORT` | `5001` | Host port |
 | `DOCLING_API_KEY` | empty | Enables `X-Api-Key` authentication |
@@ -164,12 +164,16 @@ See [Operations](docs/OPERATIONS.md) for deployment and backup guidance, and
 
 1. Read the upstream Docling Serve release notes and migration guidance.
 2. Change `DOCLING_VERSION` in `.env` and `.env.example`.
-3. Run `make pull` and `make up`.
-4. Run `make smoke` and test representative documents.
-5. Commit the version change and update `CHANGELOG.md`.
+3. Run `make pull` and `make models` so newly required model checkpoints are
+   added to the persistent cache.
+4. Run `make up`, `make wait`, and `make smoke`.
+5. Test representative documents and the Gradio UI.
+6. Commit the version change and update `CHANGELOG.md`.
 
-The model cache is preserved during normal upgrades. If upstream model formats
-change incompatibly, run `make reset-cache` and then `make models`.
+The model cache is preserved during normal upgrades. `make models` is intended
+to populate checkpoints required by the newly pinned image without deleting the
+existing cache. Use `make reset-cache` only when the cache is corrupted or an
+upstream change explicitly requires a clean model cache.
 
 ## Project status
 

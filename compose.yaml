@@ -1,7 +1,7 @@
 name: ${COMPOSE_PROJECT_NAME:-docling-local}
 
 x-docling-image: &docling-image
-  image: ${DOCLING_IMAGE_REPOSITORY:-quay.io/docling-project/docling-serve}:${DOCLING_VERSION:-v1.23.0}
+  image: ${DOCLING_IMAGE_REPOSITORY:-quay.io/docling-project/docling-serve}:${DOCLING_VERSION:-v1.32.0}
 
 x-docling-environment: &docling-environment
   HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
@@ -49,7 +49,12 @@ services:
   docling-models:
     <<: *docling-image
     profiles: [tools]
-    command: ["bash", "-lc", "docling-tools models download --all"]
+    command:
+      - bash
+      - -lc
+      - >-
+        docling-tools models download
+        -o /opt/app-root/src/.cache/docling/models
     environment:
       HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
     volumes:
